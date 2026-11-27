@@ -1,0 +1,63 @@
+services:
+  database:
+    image: mysql:8.0.40
+    environment:
+      MYSQL_DATABASE: news_meter
+      MYSQL_USER: news_meter
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Run run_platform.bat first}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Run run_platform.bat first}
+    volumes:
+      - news_database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql --host=127.0.0.1 --user=$$MYSQL_USER --database=$$MYSQL_DATABASE --execute='SELECT 1'"]
+      interval: 4s
+      timeout: 4s
+      retries: 30
+  ai:
+    build: ./ai-service
+    environment:
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:?Run run_platform.bat first}
+      NEWS_PROVIDER: ${NEWS_PROVIDER:-gnews}
+      GNEWS_API_KEY: ${GNEWS_API_KEY:-}
+      INCEPTION_API_KEY: ${INCEPTION_API_KEY:-}
+      INCEPTION_BASE_URL: ${INCEPTION_BASE_URL:-https://api.inceptionlabs.ai/v1}
+      INCEPTION_MODEL: ${INCEPTION_MODEL:-mercury-2.5}
+    depends_on:
+      database:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 4s
+      timeout: 4s
+      retries: 20
+  backend:
+    build: ./backend
+    environment:
+      DB_URL: jdbc:mysql://database:3306/news_meter?sslMode=REQUIRED
+      DB_USER: news_meter
+      DB_PASSWORD: ${DB_PASSWORD}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      AI_URL: http://ai:8001
+    depends_on:
+      ai:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8086/api/health"]
+      interval: 4s
+      timeout: 4s
+      retries: 30
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:5174:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/api/health"]
+      interval: 4s
+      timeout: 4s
+      retries: 20
+volumes:
+  news_database:
+
